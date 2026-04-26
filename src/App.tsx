@@ -10,6 +10,8 @@ import RecruiterPage from "./pages/RecruiterPage.tsx";
 import CandidateProfile from "./pages/CandidateProfile.tsx";
 import AdminDashboard from "./pages/AdminDashboard.tsx";
 import NotFound from "./pages/NotFound.tsx";
+import CheckoutPage from "./pages/Checkout.tsx"; // <-- Added Checkout
+import BillingPage from "./pages/Billing.tsx";
 
 const queryClient = new QueryClient();
 
@@ -27,6 +29,8 @@ const App = () => (
             <Route path="/profile" element={<CandidateProfile />} />
             <Route path="/admin" element={<AdminDashboard />} />
             <Route path="*" element={<NotFound />} />
+            <Route path="/checkout" element={<CheckoutPage />} />
+            <Route path="/billing" element={<BillingPage />} />
           </Routes>
         </AuthProvider>
       </BrowserRouter>

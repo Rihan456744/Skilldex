@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Menu, X, LogIn, User, LayoutDashboard } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNavigate } from "react-router-dom";
+import { supabase } from "@/integrations/supabase/client";
 import logo from "@/assets/skilldex-logo.png";
 
 interface NavbarProps {
@@ -13,7 +14,8 @@ interface NavbarProps {
 const Navbar = ({ activeSection, onNavigate }: NavbarProps) => {
   const [scrolled, setScrolled] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
-  const { user, isRecruiter } = useAuth();
+  const [isEnterprise, setIsEnterprise] = useState(false);
+  const { user, isAdmin } = useAuth();
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -21,6 +23,37 @@ const Navbar = ({ activeSection, onNavigate }: NavbarProps) => {
     window.addEventListener("scroll", onScroll);
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
+
+  // Strict Enterprise Check for Navbar
+  useEffect(() => {
+    if (!user) {
+      setIsEnterprise(false);
+      return;
+    }
+    
+    const checkEnterpriseAccess = async () => {
+      // Admins always get access to the dashboard button
+      if (isAdmin) {
+        setIsEnterprise(true);
+        return;
+      }
+      
+      const { data: cust } = await supabase.from('billing_customers').select('id').eq('user_id', user.id).maybeSingle();
+      if (cust) {
+        const { data: sub } = await supabase.from('billing_subscriptions').select('plan_name, status')
+          .eq('billing_customer_id', cust.id)
+          .order('created_at', { ascending: false }).limit(1).maybeSingle();
+          
+        if (sub && sub.status === 'active' && sub.plan_name === 'enterprise') {
+          setIsEnterprise(true);
+        } else {
+          setIsEnterprise(false);
+        }
+      }
+    };
+
+    checkEnterpriseAccess();
+  }, [user, isAdmin]);
 
   const handleNav = (section: string) => {
     onNavigate(section);
@@ -31,7 +64,8 @@ const Navbar = ({ activeSection, onNavigate }: NavbarProps) => {
     { id: "home", label: "Home" },
     { id: "scanner", label: "Resume Scanner" },
     { id: "jobs", label: "Job Board" },
-    ...(user && isRecruiter ? [{ id: "dashboard", label: "Dashboard", icon: true }] : []),
+    // Only show Dashboard link if they are Enterprise or Admin
+    ...(user && isEnterprise ? [{ id: "dashboard", label: "Dashboard", icon: true }] : []),
   ];
 
   return (
@@ -135,7 +169,7 @@ const Navbar = ({ activeSection, onNavigate }: NavbarProps) => {
                 {navLinks.map((link) => (
                   <button
                     key={link.id}
-                    onClick={() => handleNav(link.id)}
+                    onClick={() => link.id === "dashboard" ? navigate("/recruiter") : handleNav(link.id)}
                     className={`w-full text-left px-4 py-3 rounded-xl text-sm font-medium transition-all ${
                       activeSection === link.id
                         ? "bg-primary/10 text-primary font-semibold"
@@ -145,15 +179,6 @@ const Navbar = ({ activeSection, onNavigate }: NavbarProps) => {
                     {link.label}
                   </button>
                 ))}
-
-                {user && isRecruiter && (
-                  <button
-                    onClick={() => { navigate("/recruiter"); setMobileOpen(false); }}
-                    className="w-full text-left px-4 py-3 rounded-xl text-sm font-medium text-foreground hover:bg-secondary transition-all flex items-center gap-2"
-                  >
-                    <LayoutDashboard className="w-4 h-4" /> Dashboard
-                  </button>
-                )}
 
                 <div className="border-t border-border my-2" />
 

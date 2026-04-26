@@ -1,11 +1,12 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Upload, FileText, CheckCircle2, XCircle, Lightbulb, ChevronDown, ChevronUp, Search, Sparkles, Loader2, LogIn } from "lucide-react";
+import { Upload, FileText, CheckCircle2, XCircle, Lightbulb, ChevronDown, ChevronUp, Search, Sparkles, Loader2, LogIn, Lock, Crown } from "lucide-react";
 import ATSScoreCircle from "./ATSScoreCircle";
 import { supabase } from "@/integrations/supabase/client";
 import { analyzeResume as analyzeResumeLocal, type ResumeAnalysis } from "@/lib/resumeParser";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNavigate } from "react-router-dom";
+import { toast } from "sonner";
 
 const ResumeScanner = () => {
   const [file, setFile] = useState<File | null>(null);
@@ -13,188 +14,145 @@ const ResumeScanner = () => {
   const [result, setResult] = useState<ResumeAnalysis | null>(null);
   const [expandedSection, setExpandedSection] = useState<string | null>("pros");
   const [dragActive, setDragActive] = useState(false);
+  const [isPremium, setIsPremium] = useState(false);
+  const [scansUsed, setScansUsed] = useState(0);
   const { user } = useAuth();
   const navigate = useNavigate();
 
+  useEffect(() => {
+    if (!user) return;
+    // Load local scan count for the current month
+    const scanKey = `resume_scans_${new Date().getMonth()}_${user.id}`;
+    setScansUsed(parseInt(localStorage.getItem(scanKey) || "0"));
+
+    const checkPremium = async () => {
+      const { data: cust } = await supabase.from('billing_customers').select('id').eq('user_id', user.id).maybeSingle();
+      if (cust) {
+        const { data: sub } = await supabase.from('billing_subscriptions').select('plan_name, status').eq('billing_customer_id', cust.id).order('created_at', { ascending: false }).limit(1).maybeSingle();
+        if (sub && sub.status === 'active' && (sub.plan_name === 'pro' || sub.plan_name === 'enterprise')) {
+          setIsPremium(true);
+        }
+      }
+    };
+    checkPremium();
+  }, [user]);
+
   const handleFile = useCallback(async (f: File) => {
-    setFile(f);
-    setAnalyzing(true);
-    setResult(null);
+    if (!isPremium && scansUsed >= 3) {
+      toast.error("Free Limit Reached: You have used your 3 free scans for this month. Upgrade to Pro for unlimited scans.");
+      const plansSection = document.getElementById('plans');
+      plansSection?.scrollIntoView({ behavior: 'smooth' });
+      return;
+    }
+
+    setFile(f); setAnalyzing(true); setResult(null);
     try {
       const text = await f.text();
-      const { data, error } = await supabase.functions.invoke("analyze-resume", { body: { resumeText: text } });
-      if (error || data?.error) {
-        const analysis = analyzeResumeLocal(text);
-        setResult(analysis);
-      } else {
-        setResult(data as ResumeAnalysis);
+      setResult(analyzeResumeLocal(text)); 
+      
+      // Increment counter for free users
+      if (!isPremium) {
+        const newCount = scansUsed + 1;
+        setScansUsed(newCount);
+        localStorage.setItem(`resume_scans_${new Date().getMonth()}_${user?.id}`, newCount.toString());
       }
     } catch {
-      try {
-        const text = await f.text();
-        setResult(analyzeResumeLocal(text));
-      } catch {
-        setResult({
-          score: 25, pros: ["File uploaded"], cons: ["Could not parse"], recommendations: ["Use .txt format"],
-          keywords: { found: [], missing: ["experience", "skills", "education"] },
-          sections: [{ name: "Contact", found: false }, { name: "Experience", found: false }, { name: "Skills", found: false }],
-        });
-      }
+      toast.error("Failed to parse resume");
     } finally {
       setAnalyzing(false);
     }
-  }, []);
+  }, [isPremium, scansUsed, user]);
 
   const onDrop = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    setDragActive(false);
-    const f = e.dataTransfer.files[0];
-    if (f) handleFile(f);
+    e.preventDefault(); setDragActive(false);
+    if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]);
   }, [handleFile]);
 
   const toggle = (s: string) => setExpandedSection(expandedSection === s ? null : s);
 
-  // Gate: require login
   if (!user) {
     return (
       <section id="scanner" className="py-20 px-4 bg-background">
-        <div className="max-w-4xl mx-auto">
-          <motion.div initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} className="text-center mb-12">
-            <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-primary/10 border border-primary/20 text-primary text-sm font-medium mb-4">
-              <Search className="w-4 h-4" />
-              AI-Powered ATS Scanner
-            </div>
-            <h2 className="text-3xl md:text-4xl font-bold font-display mb-3">
-              Check Your <span className="gradient-text">ATS Score</span>
-            </h2>
-            <p className="text-muted-foreground max-w-md mx-auto mb-8">
-              Upload your resume and get AI-powered feedback on ATS compatibility, strengths, and improvements.
-            </p>
-          </motion.div>
-          <motion.div initial={{ opacity: 0, scale: 0.95 }} whileInView={{ opacity: 1, scale: 1 }} viewport={{ once: true }}
-            className="card-glass rounded-2xl p-12 text-center">
-            <div className="w-20 h-20 rounded-2xl mx-auto mb-6 flex items-center justify-center bg-primary/10">
-              <LogIn className="w-9 h-9 text-primary" />
-            </div>
-            <h3 className="text-xl font-display font-semibold mb-2 text-foreground">Sign in to scan your resume</h3>
-            <p className="text-muted-foreground text-sm mb-6">Create a free account to access the AI-powered ATS scanner.</p>
-            <button onClick={() => navigate("/auth")}
-              className="px-8 py-3 rounded-lg font-display font-semibold text-sm text-primary-foreground"
-              style={{ background: "var(--gradient-primary)" }}>
-              Sign In to Continue
-            </button>
-          </motion.div>
+        <div className="max-w-4xl mx-auto text-center">
+          <h2 className="text-3xl font-bold font-display mb-8">Check Your <span className="text-primary">ATS Score</span></h2>
+          <button onClick={() => navigate("/auth")} className="px-8 py-3 rounded-lg font-display font-semibold bg-primary text-primary-foreground">
+            Sign In to Scan Resume
+          </button>
         </div>
       </section>
     );
   }
 
+  const PremiumLock = () => (
+    <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-background/60 backdrop-blur-[4px] rounded-2xl border border-border">
+      <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center mb-3"><Lock className="w-6 h-6 text-primary" /></div>
+      <h4 className="font-bold text-lg mb-1 text-foreground">Premium Feature</h4>
+      <p className="text-sm text-foreground/80 mb-4 font-medium text-center px-6">Upgrade to Pro to unlock detailed AI feedback, weaknesses, and missing keywords.</p>
+      <button onClick={() => document.getElementById('plans')?.scrollIntoView({ behavior: 'smooth' })} className="px-6 py-2.5 bg-primary text-primary-foreground rounded-xl text-sm font-bold shadow-lg hover:bg-primary/90 transition-all hover:scale-105">
+        Upgrade to Pro
+      </button>
+    </div>
+  );
+
   return (
     <section id="scanner" className="py-20 px-4 bg-background">
       <div className="max-w-4xl mx-auto">
-        <motion.div initial={{ opacity: 0, y: 30 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true, margin: "-80px" }} transition={{ duration: 0.6, ease: "easeOut" }} className="text-center mb-12">
-          <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-primary/10 border border-primary/20 text-primary text-sm font-medium mb-4">
-            <Search className="w-4 h-4" />
-            AI-Powered ATS Scanner
-          </div>
-          <h2 className="text-3xl md:text-4xl font-bold font-display mb-3">
-            Check Your <span className="gradient-text">ATS Score</span>
-          </h2>
-          <p className="text-muted-foreground max-w-md mx-auto">
-            Upload your resume and get AI-powered feedback on ATS compatibility.
-          </p>
-        </motion.div>
+        <div className="text-center mb-12">
+          <h2 className="text-3xl font-bold font-display mb-3">AI Resume <span className="text-primary">Scanner</span></h2>
+          {!isPremium && <p className="text-muted-foreground text-sm font-medium">Free Scans Remaining: <span className="text-foreground">{3 - scansUsed}/3</span></p>}
+          {isPremium && <p className="text-success text-sm font-medium flex items-center justify-center gap-1"><Sparkles className="w-4 h-4"/> Unlimited Pro Scans Active</p>}
+        </div>
 
         <AnimatePresence mode="wait">
           {!result && !analyzing && (
-            <motion.div key="upload" initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}
-              className={`relative card-glass rounded-2xl p-12 text-center cursor-pointer transition-all duration-300 ${dragActive ? "border-primary glow-effect" : ""}`}
-              onDragOver={(e) => { e.preventDefault(); setDragActive(true); }}
-              onDragLeave={() => setDragActive(false)}
-              onDrop={onDrop}
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className={`card-glass rounded-2xl p-12 text-center cursor-pointer ${dragActive ? 'border-primary glow-effect' : ''}`}
+              onDragOver={(e) => { e.preventDefault(); setDragActive(true); }} onDragLeave={() => setDragActive(false)} onDrop={onDrop}
               onClick={() => document.getElementById("resume-upload")?.click()}>
-              <input id="resume-upload" type="file" accept=".txt,.pdf,.doc,.docx" className="hidden"
-                onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); }} />
-              <div className="animate-float">
-                <div className="w-20 h-20 rounded-2xl mx-auto mb-6 flex items-center justify-center" style={{ background: "var(--gradient-primary)" }}>
-                  <Upload className="w-9 h-9 text-primary-foreground" />
-                </div>
-              </div>
-              <h3 className="text-xl font-display font-semibold mb-2 text-foreground">Drop your resume here</h3>
-              <p className="text-muted-foreground text-sm mb-4">or click to browse • .txt, .pdf, .doc, .docx</p>
-              <p className="text-xs text-muted-foreground/60">For best results, use a .txt file</p>
+              <input id="resume-upload" type="file" accept=".txt,.pdf,.doc,.docx" className="hidden" onChange={(e) => { if (e.target.files?.[0]) handleFile(e.target.files[0]); }} />
+              <Upload className="w-12 h-12 text-primary mx-auto mb-4" />
+              <h3 className="text-xl font-semibold mb-2">Drop your resume here</h3>
+              {!isPremium && scansUsed >= 3 && <p className="text-destructive font-medium mt-2">Free limit reached. Please upgrade.</p>}
             </motion.div>
           )}
 
           {analyzing && (
-            <motion.div key="analyzing" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              className="card-glass rounded-2xl p-16 text-center">
-              <div className="relative w-20 h-20 mx-auto mb-6">
-                <Loader2 className="w-20 h-20 text-primary animate-spin" />
-                <Sparkles className="absolute inset-0 m-auto w-8 h-8 text-primary" />
-              </div>
-              <h3 className="text-xl font-display font-semibold mb-2 text-foreground">AI is Analyzing Your Resume...</h3>
-              <p className="text-muted-foreground text-sm">Deep scanning for ATS compatibility, keywords, and structure</p>
+            <motion.div className="card-glass rounded-2xl p-16 text-center">
+              <Loader2 className="w-16 h-16 text-primary animate-spin mx-auto mb-4" />
+              <h3 className="text-xl font-semibold">AI is Analyzing...</h3>
             </motion.div>
           )}
 
           {result && (
-            <motion.div key="results" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
-              <div className="card-glass rounded-2xl p-8">
-                <div className="flex flex-col md:flex-row items-center gap-8">
-                  <ATSScoreCircle score={result.score} />
-                  <div className="flex-1 text-center md:text-left">
-                    <div className="flex items-center gap-2 justify-center md:justify-start mb-2">
-                      <FileText className="w-5 h-5 text-primary" />
-                      <span className="font-medium text-foreground">{file?.name}</span>
-                    </div>
-                    <p className="text-muted-foreground text-sm mb-4">
-                      {result.score >= 75 ? "Great resume! Strong ATS compatibility." : result.score >= 50 ? "Good start, room for improvement." : "Needs significant improvements for ATS."}
-                    </p>
-                    <div className="flex flex-wrap gap-2 justify-center md:justify-start">
-                      {result.sections.map(s => (
-                        <span key={s.name} className={`text-xs px-2.5 py-1 rounded-full font-medium ${s.found ? "bg-success/15 text-success" : "bg-destructive/15 text-destructive"}`}>
-                          {s.found ? "✓" : "✗"} {s.name}
-                        </span>
-                      ))}
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
+              <div className="card-glass rounded-2xl p-8 flex flex-col md:flex-row items-center gap-8">
+                <ATSScoreCircle score={result.score} />
+                <div className="flex-1 text-center md:text-left">
+                  <h3 className="font-semibold text-lg">{file?.name}</h3>
+                  <p className="text-muted-foreground text-sm mt-1">Score: {result.score}/100</p>
+                </div>
+              </div>
+
+              {/* Free Section */}
+              <CollapsibleSection title="Basic Strengths" count={result.pros.length} icon={<CheckCircle2 className="w-4 h-4 text-success" />} iconBg="bg-success/15" expanded={expandedSection === "pros"} onToggle={() => toggle("pros")} dotColor="text-success" items={result.pros} />
+
+              {/* Protected Sections (Blur applied if not premium) */}
+              <div className="relative">
+                {!isPremium && <PremiumLock />}
+                <div className={!isPremium ? "opacity-30 pointer-events-none select-none space-y-6 blur-[3px]" : "space-y-6"}>
+                  <CollapsibleSection title="Detailed Weaknesses" count={result.cons.length} icon={<XCircle className="w-4 h-4 text-destructive" />} iconBg="bg-destructive/15" expanded={isPremium ? expandedSection === "cons" : true} onToggle={() => toggle("cons")} dotColor="text-destructive" items={result.cons} />
+                  <CollapsibleSection title="AI Recommendations" count={result.recommendations.length} icon={<Lightbulb className="w-4 h-4 text-warning" />} iconBg="bg-warning/15" expanded={isPremium ? expandedSection === "recs" : true} onToggle={() => toggle("recs")} dotColor="text-warning" items={result.recommendations} />
+                  
+                  <div className="card-glass rounded-2xl p-5">
+                    <h4 className="font-semibold mb-4">Keyword Optimization</h4>
+                    <div className="grid md:grid-cols-2 gap-4">
+                      <div><p className="text-xs text-success mb-2 font-bold uppercase">Found Keywords</p><div className="flex flex-wrap gap-1.5">{result.keywords.found.map(k => <span key={k} className="text-xs px-2 py-0.5 rounded bg-success/10 text-success border border-success/20">{k}</span>)}</div></div>
+                      <div><p className="text-xs text-destructive mb-2 font-bold uppercase">Missing Keywords</p><div className="flex flex-wrap gap-1.5">{result.keywords.missing.map(k => <span key={k} className="text-xs px-2 py-0.5 rounded bg-destructive/10 text-destructive border border-destructive/20">{k}</span>)}</div></div>
                     </div>
                   </div>
                 </div>
               </div>
 
-              <CollapsibleSection title="Strengths" count={result.pros.length} icon={<CheckCircle2 className="w-4 h-4 text-success" />}
-                iconBg="bg-success/15" expanded={expandedSection === "pros"} onToggle={() => toggle("pros")} dotColor="text-success" items={result.pros} />
-              <CollapsibleSection title="Weaknesses" count={result.cons.length} icon={<XCircle className="w-4 h-4 text-destructive" />}
-                iconBg="bg-destructive/15" expanded={expandedSection === "cons"} onToggle={() => toggle("cons")} dotColor="text-destructive" items={result.cons} />
-              <CollapsibleSection title="Recommendations" count={result.recommendations.length} icon={<Lightbulb className="w-4 h-4 text-warning" />}
-                iconBg="bg-warning/15" expanded={expandedSection === "recs"} onToggle={() => toggle("recs")} dotColor="text-warning" items={result.recommendations} prefix="→" />
-
-              <div className="card-glass rounded-2xl p-5">
-                <h4 className="font-display font-semibold mb-4 text-foreground">Keyword Analysis</h4>
-                <div className="grid md:grid-cols-2 gap-4">
-                  <div>
-                    <p className="text-xs text-success font-medium mb-2 uppercase tracking-wider">Found Keywords</p>
-                    <div className="flex flex-wrap gap-1.5">
-                      {result.keywords.found.slice(0, 12).map(k => (
-                        <span key={k} className="text-xs px-2 py-0.5 rounded-md bg-success/10 text-success border border-success/20">{k}</span>
-                      ))}
-                    </div>
-                  </div>
-                  <div>
-                    <p className="text-xs text-destructive font-medium mb-2 uppercase tracking-wider">Missing Keywords</p>
-                    <div className="flex flex-wrap gap-1.5">
-                      {result.keywords.missing.map(k => (
-                        <span key={k} className="text-xs px-2 py-0.5 rounded-md bg-destructive/10 text-destructive border border-destructive/20">{k}</span>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <button onClick={() => { setResult(null); setFile(null); }}
-                className="w-full py-3 rounded-xl border border-border text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors">
-                Scan Another Resume
-              </button>
+              <button onClick={() => { setResult(null); setFile(null); }} className="w-full py-3 rounded-xl border border-border font-medium hover:bg-secondary transition text-foreground">Scan Another Resume</button>
             </motion.div>
           )}
         </AnimatePresence>
@@ -203,30 +161,16 @@ const ResumeScanner = () => {
   );
 };
 
-interface CollapsibleSectionProps {
-  title: string; count: number; icon: React.ReactNode; iconBg: string;
-  expanded: boolean; onToggle: () => void; dotColor: string; items: string[]; prefix?: string;
-}
-
-const CollapsibleSection = ({ title, count, icon, iconBg, expanded, onToggle, dotColor, items, prefix = "•" }: CollapsibleSectionProps) => (
+const CollapsibleSection = ({ title, count, icon, iconBg, expanded, onToggle, dotColor, items }: any) => (
   <div className="card-glass rounded-2xl overflow-hidden">
     <button onClick={onToggle} className="w-full flex items-center justify-between p-5">
-      <div className="flex items-center gap-3">
-        <div className={`w-8 h-8 rounded-lg ${iconBg} flex items-center justify-center`}>{icon}</div>
-        <span className="font-display font-semibold text-foreground">{title} ({count})</span>
-      </div>
+      <div className="flex items-center gap-3"><div className={`w-8 h-8 rounded-lg ${iconBg} flex items-center justify-center`}>{icon}</div><span className="font-semibold text-foreground">{title} ({count})</span></div>
       {expanded ? <ChevronUp className="w-5 h-5 text-muted-foreground" /> : <ChevronDown className="w-5 h-5 text-muted-foreground" />}
     </button>
     <AnimatePresence>
       {expanded && (
         <motion.div initial={{ height: 0 }} animate={{ height: "auto" }} exit={{ height: 0 }} className="overflow-hidden">
-          <div className="px-5 pb-5 space-y-2">
-            {items.map((item, i) => (
-              <div key={i} className="flex items-start gap-2 text-sm text-secondary-foreground">
-                <span className={`${dotColor} mt-0.5`}>{prefix}</span> {item}
-              </div>
-            ))}
-          </div>
+          <div className="px-5 pb-5 space-y-2">{items.map((item: string, i: number) => <div key={i} className="flex items-start gap-2 text-sm text-foreground"><span className={dotColor}>•</span> {item}</div>)}</div>
         </motion.div>
       )}
     </AnimatePresence>

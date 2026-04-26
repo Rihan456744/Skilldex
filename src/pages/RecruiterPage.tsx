@@ -196,8 +196,36 @@ const RecruiterPage = () => {
   const [repostJobId, setRepostJobId] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!isRecruiter && !loading) navigate("/");
-  }, [isRecruiter, loading, navigate]);
+    if (!user) {
+      navigate("/");
+      return;
+    }
+    
+    // Strict Enterprise Access Check
+    const verifyEnterpriseAccess = async () => {
+      const { data: cust } = await supabase.from('billing_customers').select('id').eq('user_id', user.id).maybeSingle();
+      let hasAccess = false;
+
+      if (cust) {
+        const { data: sub } = await supabase.from('billing_subscriptions').select('plan_name, status')
+          .eq('billing_customer_id', cust.id)
+          .order('created_at', { ascending: false }).limit(1).maybeSingle();
+          
+        if (sub && sub.status === 'active' && sub.plan_name === 'enterprise') {
+          hasAccess = true;
+        }
+      }
+
+      // If not enterprise and not an Admin, kick them out
+      if (!hasAccess && !isAdmin) {
+        toast.error("Enterprise Subscription Required: You must upgrade to Enterprise to access the Recruiter Dashboard and post jobs.");
+        navigate("/");
+        setTimeout(() => document.getElementById('plans')?.scrollIntoView({ behavior: 'smooth' }), 500);
+      }
+    };
+
+    verifyEnterpriseAccess();
+  }, [user, isAdmin, navigate]);
 
   const fetchJobs = useCallback(async () => {
     if (!user) return;
