@@ -1,17 +1,18 @@
 import { useState, useCallback, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Upload, FileText, CheckCircle2, XCircle, Lightbulb, ChevronDown, ChevronUp, Search, Sparkles, Loader2, LogIn, Lock, Crown } from "lucide-react";
+import { Upload, FileText, CheckCircle2, XCircle, Lightbulb, ChevronDown, ChevronUp, Search, Sparkles, Loader2, LogIn, Lock } from "lucide-react";
 import ATSScoreCircle from "./ATSScoreCircle";
 import { supabase } from "@/integrations/supabase/client";
-import { analyzeResume as analyzeResumeLocal, type ResumeAnalysis } from "@/lib/resumeParser";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 
+// We removed the fake local parser import entirely!
+
 const ResumeScanner = () => {
   const [file, setFile] = useState<File | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
-  const [result, setResult] = useState<ResumeAnalysis | null>(null);
+  const [result, setResult] = useState<any | null>(null);
   const [expandedSection, setExpandedSection] = useState<string | null>("pros");
   const [dragActive, setDragActive] = useState(false);
   const [isPremium, setIsPremium] = useState(false);
@@ -21,7 +22,6 @@ const ResumeScanner = () => {
 
   useEffect(() => {
     if (!user) return;
-    // Load local scan count for the current month
     const scanKey = `resume_scans_${new Date().getMonth()}_${user.id}`;
     setScansUsed(parseInt(localStorage.getItem(scanKey) || "0"));
 
@@ -40,24 +40,33 @@ const ResumeScanner = () => {
   const handleFile = useCallback(async (f: File) => {
     if (!isPremium && scansUsed >= 3) {
       toast.error("Free Limit Reached: You have used your 3 free scans for this month. Upgrade to Pro for unlimited scans.");
-      const plansSection = document.getElementById('plans');
-      plansSection?.scrollIntoView({ behavior: 'smooth' });
+      document.getElementById('plans')?.scrollIntoView({ behavior: 'smooth' });
       return;
     }
 
     setFile(f); setAnalyzing(true); setResult(null);
     try {
       const text = await f.text();
-      setResult(analyzeResumeLocal(text)); 
       
-      // Increment counter for free users
+      // FORCE REAL AI - NO FAKE FALLBACK
+      const { data, error } = await supabase.functions.invoke("analyze-resume", { 
+        body: { resumeText: text } 
+      });
+      
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+      
+      setResult(data); 
+      
       if (!isPremium) {
         const newCount = scansUsed + 1;
         setScansUsed(newCount);
         localStorage.setItem(`resume_scans_${new Date().getMonth()}_${user?.id}`, newCount.toString());
       }
-    } catch {
-      toast.error("Failed to parse resume");
+    } catch (err: any) {
+      console.error(err);
+      toast.error("AI Analysis failed: " + (err.message || "Please try again."));
+      setFile(null); // Reset file so they can try again
     } finally {
       setAnalyzing(false);
     }
@@ -132,10 +141,8 @@ const ResumeScanner = () => {
                 </div>
               </div>
 
-              {/* Free Section */}
               <CollapsibleSection title="Basic Strengths" count={result.pros.length} icon={<CheckCircle2 className="w-4 h-4 text-success" />} iconBg="bg-success/15" expanded={expandedSection === "pros"} onToggle={() => toggle("pros")} dotColor="text-success" items={result.pros} />
 
-              {/* Protected Sections (Blur applied if not premium) */}
               <div className="relative">
                 {!isPremium && <PremiumLock />}
                 <div className={!isPremium ? "opacity-30 pointer-events-none select-none space-y-6 blur-[3px]" : "space-y-6"}>
@@ -145,8 +152,8 @@ const ResumeScanner = () => {
                   <div className="card-glass rounded-2xl p-5">
                     <h4 className="font-semibold mb-4">Keyword Optimization</h4>
                     <div className="grid md:grid-cols-2 gap-4">
-                      <div><p className="text-xs text-success mb-2 font-bold uppercase">Found Keywords</p><div className="flex flex-wrap gap-1.5">{result.keywords.found.map(k => <span key={k} className="text-xs px-2 py-0.5 rounded bg-success/10 text-success border border-success/20">{k}</span>)}</div></div>
-                      <div><p className="text-xs text-destructive mb-2 font-bold uppercase">Missing Keywords</p><div className="flex flex-wrap gap-1.5">{result.keywords.missing.map(k => <span key={k} className="text-xs px-2 py-0.5 rounded bg-destructive/10 text-destructive border border-destructive/20">{k}</span>)}</div></div>
+                      <div><p className="text-xs text-success mb-2 font-bold uppercase">Found Keywords</p><div className="flex flex-wrap gap-1.5">{result.keywords.found.map((k: string) => <span key={k} className="text-xs px-2 py-0.5 rounded bg-success/10 text-success border border-success/20">{k}</span>)}</div></div>
+                      <div><p className="text-xs text-destructive mb-2 font-bold uppercase">Missing Keywords</p><div className="flex flex-wrap gap-1.5">{result.keywords.missing.map((k: string) => <span key={k} className="text-xs px-2 py-0.5 rounded bg-destructive/10 text-destructive border border-destructive/20">{k}</span>)}</div></div>
                     </div>
                   </div>
                 </div>

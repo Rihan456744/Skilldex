@@ -120,26 +120,65 @@ const JobBoard = () => {
 
         <AnimatePresence mode="wait">
           {step === "list" && (
-            <motion.div key="list" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-4">
+            <motion.div key="list" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
               {loading ? (
                 <div className="text-center py-12 text-muted-foreground">Loading jobs...</div>
               ) : jobs.length === 0 ? (
                  <div className="text-center py-12 text-muted-foreground">No active jobs found.</div>
-              ) : jobs.map((job) => (
-                <motion.div key={job.id} onClick={() => startApply(job)} className="card-glass rounded-xl p-5 hover:border-primary/30 transition-all cursor-pointer group">
-                  <div className="flex items-center justify-between">
-                    <div className="flex-1">
-                      <h3 className="font-display font-semibold text-lg group-hover:text-primary transition-colors text-foreground">{job.title}</h3>
-                      <p className="text-sm text-muted-foreground mt-1">{job.company}</p>
-                      <div className="flex flex-wrap items-center gap-3 mt-3 text-xs text-muted-foreground">
-                        <span className="flex items-center gap-1"><MapPin className="w-3.5 h-3.5" />{job.location}</span>
-                        <span className="flex items-center gap-1"><Clock className="w-3.5 h-3.5" />{job.type}</span>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                  {jobs.map((job, i) => (
+                    <motion.div 
+                      key={job.id} 
+                      initial={{ opacity: 0, y: 20 }} 
+                      animate={{ opacity: 1, y: 0 }} 
+                      transition={{ delay: i * 0.05 }}
+                      onClick={() => startApply(job)} 
+                      className="bg-card border border-border/60 hover:border-primary/40 shadow-sm hover:shadow-lg rounded-2xl p-6 cursor-pointer group flex flex-col relative overflow-hidden transition-all hover:-translate-y-1"
+                    >
+                      {/* Left accent border on hover */}
+                      <div className="absolute top-0 left-0 w-1.5 h-full bg-primary/20 group-hover:bg-primary transition-colors" />
+                      
+                      <div className="flex justify-between items-start mb-4 pl-2">
+                        <div>
+                          <h3 className="font-display font-semibold text-lg group-hover:text-primary transition-colors text-foreground line-clamp-1">{job.title}</h3>
+                          <p className="text-sm font-medium text-muted-foreground mt-1">{job.company}</p>
+                        </div>
+                        <div className="bg-primary/10 text-primary p-2.5 rounded-xl shrink-0 ml-3">
+                          <Briefcase className="w-4 h-4" />
+                        </div>
                       </div>
-                    </div>
-                    <ChevronRight className="w-5 h-5 text-muted-foreground group-hover:text-primary transition-colors" />
-                  </div>
-                </motion.div>
-              ))}
+                      
+                      <div className="mt-auto pl-2">
+                        {/* Tags */}
+                        <div className="flex flex-wrap gap-2 mb-5">
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-secondary text-xs font-medium text-secondary-foreground border border-border/50">
+                            <MapPin className="w-3.5 h-3.5" /> {job.location}
+                          </span>
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-secondary text-xs font-medium text-secondary-foreground border border-border/50">
+                            <Clock className="w-3.5 h-3.5" /> {job.type}
+                          </span>
+                          {job.salary && (
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-success/10 text-xs font-medium text-success border border-success/20">
+                              <DollarSign className="w-3.5 h-3.5" /> {job.salary}
+                            </span>
+                          )}
+                        </div>
+                        
+                        {/* Bottom Row */}
+                        <div className="flex items-center justify-between border-t border-border/50 pt-4">
+                          <span className="text-xs text-muted-foreground font-medium bg-muted px-2 py-1 rounded-md">
+                            {(job.screening_questions as any[])?.length || 0} Questions
+                          </span>
+                          <span className="text-sm font-bold text-primary flex items-center gap-1 group-hover:translate-x-1 transition-transform">
+                            Apply Now <ChevronRight className="w-4 h-4" />
+                          </span>
+                        </div>
+                      </div>
+                    </motion.div>
+                  ))}
+                </div>
+              )}
             </motion.div>
           )}
 
